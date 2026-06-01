@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<style>
+    @keyframes spinner {
+        0% {
+            transform: scale(.1) rotate(0deg);
+            fill: currentColor;
+        }
+
+        33% {
+            transform: scale(1) rotate(150deg);
+            fill: transparent;
+        }
+
+        66% {
+            transform: scale(1) rotate(210deg);
+            fill: transparent;
+        }
+
+        100% {
+            transform: scale(.1) rotate(360deg);
+            fill: currentColor;
+        }
+    }
+
+    .spinner {
+        animation: spinner 1.5s infinite linear;
+        color: rgb(6, 75, 67);
+    }
+
+    .button {
+        padding: 10px 24px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        margin-bottom: 20px;
+        transition: background-color 0.2s ease;
+    }
+
+    .button-start {
+        background-color: rgb(6, 75, 67);
+
+        &:hover {
+            background-color: rgb(9, 104, 93);
+        }
+
+        &:active {
+            background-color: rgb(4, 54, 48);
+        }
+    }
+
+    .button-unregister {
+        background-color: rgb(86, 104, 232);
+
+        &:hover {
+            background-color: rgb(109, 128, 246);
+        }
+
+        &:active {
+            background-color: rgb(56, 70, 184);
+        }
+    }
+</style>
+<body>
+<button id="start-button" class="button button-start">Start!</button>
+<button id="unregister-button" class="button button-unregister">Unregister Service Worker</button>
+<div>
+    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="56" fill="none" class="spinner"><path stroke="currentColor" stroke-width="4" d="M3.464 30a4 4 0 0 1 0-4L16 4.287a4 4 0 0 1 3.464-2h25.072a4 4 0 0 1 3.464 2L60.536 26a4 4 0 0 1 0 4L48 51.713a4 4 0 0 1-3.464 2H19.464a4 4 0 0 1-3.464-2L3.464 30Z"/></svg>
+</div>
+<div id="result"></div>
+</body>
+
+<script>
+    let serviceWorker;
+    const getServiceWorker = async (scriptURL, options) => {
+        if ('serviceWorker' in navigator) {
+            try {
+                let registration = await navigator.serviceWorker.getRegistration();
+                if (!registration) {
+                    registration = await navigator.serviceWorker.register(scriptURL, options);
+                }
+                await navigator.serviceWorker.ready;
+                return {
+                    registration: registration, // ServiceWorkerRegistration
+                    container: navigator.serviceWorker, // ServiceWorkerContainer
+                    controller: registration.active, // ServiceWorker
+                    addEventListener: navigator.serviceWorker.addEventListener.bind(navigator.serviceWorker),
+                    postMessage: registration.active.postMessage.bind(registration.active)
+                };
+            } catch (error) {
+                console.error(`Registration failed with ${error}`);
+            }
+        }
+    }
+
+    (async () => {
+        serviceWorker = await getServiceWorker('./thread.js', { scope: './' });
+        if (!serviceWorker) {
+            return;
+        }
+
+        console.log('Service Worker готов, отправляем start');
+        
+        serviceWorker.postMessage({
+            name: 'start',
+            data: {
+                timeout: 2000
+            }
+        });
+
+        serviceWorker.addEventListener('message', (event) => {
+            const data = event.data;
+            if (data.name === 'result') {
+                console.log('result', data.data);
+                document.getElementById('result').innerHTML = data.data;
+                if (!data.data) {
+                    console.log('Удаляем сервис воркер')
+                    serviceWorker.registration.unregister();
+                    serviceWorker = null;
+                }
+            }
+        });
+    })();
+
+    document.getElementById('unregister-button').addEventListener('click', () => {
+        if (serviceWorker) {
+            serviceWorker.postMessage({
+                name: 'unregister'
+            });
+        }
+    });
+
+    document.getElementById('start-button').addEventListener('click', () => {
+        if (serviceWorker) {
+            serviceWorker.postMessage({
+                name: 'recalculate',
+                data: {
+                    timeout: 2000
+                }
+            });
+        }
+    });
+</script>
+</html>
