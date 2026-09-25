@@ -78,75 +78,88 @@
 <div id="result"></div>
 </body>
 
+<script src="./contract.js"></script>
 <script>
-    let serviceWorker;
-    const getServiceWorker = async (scriptURL, options) => {
-        if ('serviceWorker' in navigator) {
-            try {
-                let registration = await navigator.serviceWorker.getRegistration();
-                if (!registration) {
-                    registration = await navigator.serviceWorker.register(scriptURL, options);
-                }
-                await navigator.serviceWorker.ready;
-                return {
-                    registration: registration, // ServiceWorkerRegistration
-                    container: navigator.serviceWorker, // ServiceWorkerContainer
-                    controller: registration.active, // ServiceWorker
-                    addEventListener: navigator.serviceWorker.addEventListener.bind(navigator.serviceWorker),
-                    postMessage: registration.active.postMessage.bind(registration.active)
-                };
-            } catch (error) {
-                console.error(`Registration failed with ${error}`);
-            }
-        }
-    }
+    const TIMEOUT = 2000;
 
-    (async () => {
-        serviceWorker = await getServiceWorker('./thread.js', { scope: './' });
-        if (!serviceWorker) {
+    const startButton = document.getElementById('start-button');
+    const unregisterButton = document.getElementById('unregister-button');
+    const resultElement = document.getElementById('result');
+
+    /** @type {ServiceWorkerRegistration | null} */
+    let registration = null;
+
+    const showText = (text) => {
+        resultElement.textContent = text;
+    };
+
+    // navigator.serviceWorker.ready резолвится один раз, поэтому после повторной регистрации
+    // ждём активации воркера у конкретной registration
+    const waitForActive = (registration) => new Promise((resolve, reject) => {
+        if (registration.active) {
+            resolve(registration.active);
             return;
         }
-
-        console.log('Service Worker готов, отправляем start');
-        
-        serviceWorker.postMessage({
-            name: 'start',
-            data: {
-                timeout: 2000
+        const worker = registration.installing || registration.waiting;
+        worker.addEventListener('statechange', () => {
+            if (worker.state === 'activated') {
+                resolve(worker);
+            } else if (worker.state === 'redundant') {
+                reject(new Error('Service Worker не удалось активировать'));
             }
         });
+    });
 
-        serviceWorker.addEventListener('message', (event) => {
-            const data = event.data;
-            if (data.name === 'result') {
-                console.log('result', data.data);
-                document.getElementById('result').innerHTML = data.data;
-                if (!data.data) {
-                    console.log('Удаляем сервис воркер')
-                    serviceWorker.registration.unregister();
-                    serviceWorker = null;
-                }
+    const register = async () => {
+        if (!('serviceWorker' in navigator)) {
+            throw new Error('Service Worker не поддерживается браузером');
+        }
+        const newRegistration = await navigator.serviceWorker.register('./thread.js', { scope: './' });
+        await waitForActive(newRegistration);
+        return newRegistration;
+    };
+
+    const sendCommand = async (name) => {
+        startButton.disabled = true;
+        showText('Считаем...');
+        try {
+            if (!registration) {
+                registration = await register();
             }
-        });
-    })();
+            registration.active.postMessage({ name, data: { timeout: TIMEOUT } });
+        } catch (error) {
+            startButton.disabled = false;
+            showText(`Ошибка: ${error.message}`);
+        }
+    };
 
-    document.getElementById('unregister-button').addEventListener('click', () => {
-        if (serviceWorker) {
-            serviceWorker.postMessage({
-                name: 'unregister'
-            });
+    navigator.serviceWorker?.addEventListener('message', (event) => {
+        const { name, data } = event.data;
+        if (name === Responses.RESULT) {
+            showText(`${data.value}${data.fromCache ? ' (из кеша)' : ''}`);
+        } else if (name === Responses.ERROR) {
+            showText(`Ошибка: ${data.message}`);
+        }
+        startButton.disabled = false;
+    });
+
+    unregisterButton.addEventListener('click', async () => {
+        if (!registration) {
+            showText('Service Worker не зарегистрирован');
+            return;
+        }
+        try {
+            await caches.delete(CACHE_NAME);
+            await registration.unregister();
+            registration = null;
+            showText('Service Worker удалён. Нажмите Start!, чтобы зарегистрировать его заново');
+        } catch (error) {
+            showText(`Ошибка: ${error.message}`);
         }
     });
 
-    document.getElementById('start-button').addEventListener('click', () => {
-        if (serviceWorker) {
-            serviceWorker.postMessage({
-                name: 'recalculate',
-                data: {
-                    timeout: 2000
-                }
-            });
-        }
-    });
+    startButton.addEventListener('click', () => sendCommand(Commands.RECALCULATE));
+
+    sendCommand(Commands.START);
 </script>
 </html>
